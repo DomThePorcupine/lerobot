@@ -14,6 +14,7 @@ class Robot(Protocol):
     num_cameras: int
     is_connected: bool
     has_camera: bool
+    features: dict
 
     def connect(self): ...
     def run_calibration(self): ...
