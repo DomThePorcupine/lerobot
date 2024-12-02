@@ -1,4 +1,5 @@
 """Functions to create an empty dataset, and populate it with frames."""
+
 # TODO(rcadene, aliberts): to adapt as class methods of next version of LeRobotDataset
 
 import concurrent
@@ -7,6 +8,7 @@ import logging
 import multiprocessing
 import shutil
 from pathlib import Path
+from typing import Any, Dict
 
 import torch
 import tqdm
@@ -15,7 +17,10 @@ from PIL import Image
 from lerobot.common.datasets.compute_stats import compute_stats
 from lerobot.common.datasets.lerobot_dataset import CODEBASE_VERSION, LeRobotDataset
 from lerobot.common.datasets.push_dataset_to_hub.aloha_hdf5_format import to_hf_dataset
-from lerobot.common.datasets.push_dataset_to_hub.utils import concatenate_episodes, get_default_encoding
+from lerobot.common.datasets.push_dataset_to_hub.utils import (
+    concatenate_episodes,
+    get_default_encoding,
+)
 from lerobot.common.datasets.utils import calculate_episode_data_index, create_branch
 from lerobot.common.datasets.video_utils import encode_video_frames
 from lerobot.common.utils.utils import log_say
@@ -49,14 +54,20 @@ def safe_stop_image_writer(func):
 
 def save_image(img_tensor, key, frame_index, episode_index, videos_dir: str):
     img = Image.fromarray(img_tensor.numpy())
-    path = Path(videos_dir) / f"{key}_episode_{episode_index:06d}" / f"frame_{frame_index:06d}.png"
+    path = (
+        Path(videos_dir)
+        / f"{key}_episode_{episode_index:06d}"
+        / f"frame_{frame_index:06d}.png"
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     img.save(str(path), quality=100)
 
 
 def loop_to_save_images_in_threads(image_queue, num_threads):
     if num_threads < 1:
-        raise NotImplementedError(f"Only `num_threads>=1` is supported for now, but {num_threads=} given.")
+        raise NotImplementedError(
+            f"Only `num_threads>=1` is supported for now, but {num_threads=} given."
+        )
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
         futures = []
@@ -69,7 +80,11 @@ def loop_to_save_images_in_threads(image_queue, num_threads):
                 break
 
             image, key, frame_index, episode_index, videos_dir = frame_data
-            futures.append(executor.submit(save_image, image, key, frame_index, episode_index, videos_dir))
+            futures.append(
+                executor.submit(
+                    save_image, image, key, frame_index, episode_index, videos_dir
+                )
+            )
 
         # Before exiting function, wait for all threads to complete
         with tqdm.tqdm(total=len(futures), desc="Writing images") as progress_bar:
@@ -79,7 +94,9 @@ def loop_to_save_images_in_threads(image_queue, num_threads):
 
 def start_image_writer_processes(image_queue, num_processes, num_threads_per_process):
     if num_processes < 1:
-        raise ValueError(f"Only `num_processes>=1` is supported, but {num_processes=} given.")
+        raise ValueError(
+            f"Only `num_processes>=1` is supported, but {num_processes=} given."
+        )
 
     if num_threads_per_process < 1:
         raise NotImplementedError(
@@ -117,7 +134,7 @@ def stop_processes(processes, queue, timeout):
     queue.join_thread()
 
 
-def start_image_writer(num_processes, num_threads):
+def start_image_writer(num_processes: int, num_threads: int) -> Dict[str, Any]:
     """This function abstract away the initialisation of processes or/and threads to
     save images on disk asynchrounously, which is critical to control a robot and record data
     at a high frame rate.
@@ -130,7 +147,7 @@ def start_image_writer(num_processes, num_threads):
     We advise to use 4 threads per camera with 0 processes. If the fps is not stable, try to increase or lower
     the number of threads. If it is still not stable, try to use 1 subprocess, or more.
     """
-    image_writer = {}
+    image_writer: Dict[str, Any] = {}
 
     if num_processes == 0:
         futures = []
@@ -141,9 +158,14 @@ def start_image_writer(num_processes, num_threads):
         # might be better than `multiprocessing.Queue()`. Source: https://www.geeksforgeeks.org/python-multiprocessing-queue-vs-multiprocessing-manager-queue
         image_queue = multiprocessing.Queue()
         processes_pool = start_image_writer_processes(
-            image_queue, num_processes=num_processes, num_threads_per_process=num_threads
+            image_queue,
+            num_processes=num_processes,
+            num_threads_per_process=num_threads,
         )
-        image_writer["processes_pool"], image_writer["image_queue"] = processes_pool, image_queue
+        image_writer["processes_pool"], image_writer["image_queue"] = (
+            processes_pool,
+            image_queue,
+        )
 
     return image_writer
 
@@ -154,7 +176,11 @@ def async_save_image(image_writer, image, key, frame_index, episode_index, video
     """
     if "threads_pool" in image_writer:
         threads_pool, futures = image_writer["threads_pool"], image_writer["futures"]
-        futures.append(threads_pool.submit(save_image, image, key, frame_index, episode_index, videos_dir))
+        futures.append(
+            threads_pool.submit(
+                save_image, image, key, frame_index, episode_index, videos_dir
+            )
+        )
     else:
         image_queue = image_writer["image_queue"]
         image_queue.put((image, key, frame_index, episode_index, videos_dir))
@@ -168,7 +194,10 @@ def stop_image_writer(image_writer, timeout):
             concurrent.futures.wait(futures, timeout=timeout)
             progress_bar.update(len(futures))
     else:
-        processes_pool, image_queue = image_writer["processes_pool"], image_writer["image_queue"]
+        processes_pool, image_queue = (
+            image_writer["processes_pool"],
+            image_writer["image_queue"],
+        )
         stop_processes(processes_pool, image_queue, timeout=timeout)
 
 
@@ -178,14 +207,14 @@ def stop_image_writer(image_writer, timeout):
 
 
 def init_dataset(
-    repo_id,
-    root,
-    force_override,
-    fps,
-    video,
-    write_images,
-    num_image_writer_processes,
-    num_image_writer_threads,
+    repo_id: str,
+    root: str,
+    force_override: bool,
+    fps: int | None,
+    video: bool,
+    write_images: bool,
+    num_image_writer_processes: int | None,
+    num_image_writer_threads: int | None,
 ):
     local_dir = Path(root) / repo_id
     if local_dir.exists() and force_override:
@@ -206,7 +235,7 @@ def init_dataset(
     else:
         num_episodes = 0
 
-    dataset = {
+    dataset: Dict[str, Any] = {
         "repo_id": repo_id,
         "local_dir": local_dir,
         "videos_dir": videos_dir,
@@ -229,7 +258,7 @@ def init_dataset(
     return dataset
 
 
-def add_frame(dataset, observation, action):
+def add_frame(dataset: Dict[str, Any], observation, action):
     if "current_episode" not in dataset:
         # initialize episode dictionary
         ep_dict = {}
@@ -310,7 +339,7 @@ def delete_current_episode(dataset):
         shutil.rmtree(tmp_imgs_dir)
 
 
-def save_current_episode(dataset):
+def save_current_episode(dataset: Dict[str, Any]):
     episode_index = dataset["num_episodes"]
     ep_dict = dataset["current_episode"]
     episodes_dir = dataset["episodes_dir"]

@@ -9,21 +9,29 @@ import traceback
 from contextlib import nullcontext
 from copy import copy
 from functools import cache
+from typing import Any, Dict
 
 import cv2
 import torch
 import tqdm
 from termcolor import colored
 
+from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.common.datasets.populate_dataset import add_frame, safe_stop_image_writer
 from lerobot.common.policies.factory import make_policy
 from lerobot.common.robot_devices.robots.utils import Robot
 from lerobot.common.robot_devices.utils import busy_wait
-from lerobot.common.utils.utils import get_safe_torch_device, init_hydra_config, set_global_seed
+from lerobot.common.utils.utils import (
+    get_safe_torch_device,
+    init_hydra_config,
+    set_global_seed,
+)
 from lerobot.scripts.eval import get_pretrained_policy_path
 
 
-def log_control_info(robot: Robot, dt_s, episode_index=None, frame_index=None, fps=None):
+def log_control_info(
+    robot: Robot, dt_s, episode_index=None, frame_index=None, fps=None
+):
     log_items = []
     if episode_index is not None:
         log_items.append(f"ep:{episode_index}")
@@ -94,7 +102,11 @@ def predict_action(observation, policy, device, use_amp):
     observation = copy(observation)
     with (
         torch.inference_mode(),
-        torch.autocast(device_type=device.type) if device.type == "cuda" and use_amp else nullcontext(),
+        (
+            torch.autocast(device_type=device.type)
+            if device.type == "cuda" and use_amp
+            else nullcontext()
+        ),
     ):
         # Convert to pytorch format: channel first and float32 in [0,1] with batch dimension
         for name in observation:
@@ -142,7 +154,9 @@ def init_keyboard_listener():
                 print("Right arrow key pressed. Exiting loop...")
                 events["exit_early"] = True
             elif key == keyboard.Key.left:
-                print("Left arrow key pressed. Exiting loop and rerecord the last episode...")
+                print(
+                    "Left arrow key pressed. Exiting loop and rerecord the last episode..."
+                )
                 events["rerecord_episode"] = True
                 events["exit_early"] = True
             elif key == keyboard.Key.esc:
@@ -161,8 +175,12 @@ def init_keyboard_listener():
 def init_policy(pretrained_policy_name_or_path, policy_overrides):
     """Instantiate the policy and load fps, device and use_amp from config yaml"""
     pretrained_policy_path = get_pretrained_policy_path(pretrained_policy_name_or_path)
-    hydra_cfg = init_hydra_config(pretrained_policy_path / "config.yaml", policy_overrides)
-    policy = make_policy(hydra_cfg=hydra_cfg, pretrained_policy_name_or_path=pretrained_policy_path)
+    hydra_cfg = init_hydra_config(
+        pretrained_policy_path / "config.yaml", policy_overrides
+    )
+    policy = make_policy(
+        hydra_cfg=hydra_cfg, pretrained_policy_name_or_path=pretrained_policy_path
+    )
 
     # Check device is available
     device = get_safe_torch_device(hydra_cfg.device, log=True)
@@ -197,14 +215,14 @@ def warmup_record(
 
 
 def record_episode(
-    robot,
-    dataset,
-    events,
-    episode_time_s,
-    display_cameras,
+    robot: Robot,
+    dataset: Dict[str, Any],
+    events: Dict[str, Any] | None,
+    episode_time_s: int,
+    display_cameras: bool,
     policy,
     device,
-    use_amp,
+    use_amp: bool,
     fps,
 ):
     control_loop(
@@ -223,12 +241,12 @@ def record_episode(
 
 @safe_stop_image_writer
 def control_loop(
-    robot,
-    control_time_s=None,
-    teleoperate=False,
-    display_cameras=False,
-    dataset=None,
-    events=None,
+    robot: Robot,
+    control_time_s: float | None = None,
+    teleoperate: bool = False,
+    display_cameras: bool = False,
+    dataset: Dict[str, Any] | None = None,
+    events: Dict[str, Any] | None = None,
     policy=None,
     device=None,
     use_amp=None,
@@ -248,7 +266,9 @@ def control_loop(
         raise ValueError("When `teleoperate` is True, `policy` should be None.")
 
     if dataset is not None and fps is not None and dataset["fps"] != fps:
-        raise ValueError(f"The dataset fps should be equal to requested fps ({dataset['fps']} != {fps}).")
+        raise ValueError(
+            f"The dataset fps should be equal to requested fps ({dataset['fps']} != {fps})."
+        )
 
     timestamp = 0
     start_episode_t = time.perf_counter()
@@ -258,6 +278,8 @@ def control_loop(
         if teleoperate:
             observation, action = robot.teleop_step(record_data=True)
         else:
+            print("Capturing observation")
+            print(robot)
             observation = robot.capture_observation()
 
             if policy is not None:
@@ -273,7 +295,9 @@ def control_loop(
         if display_cameras and not is_headless():
             image_keys = [key for key in observation if "image" in key]
             for key in image_keys:
-                cv2.imshow(key, cv2.cvtColor(observation[key].numpy(), cv2.COLOR_RGB2BGR))
+                cv2.imshow(
+                    key, cv2.cvtColor(observation[key].numpy(), cv2.COLOR_RGB2BGR)
+                )
             cv2.waitKey(1)
 
         if fps is not None:
